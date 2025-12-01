@@ -3,11 +3,11 @@ import serial
 import serial.tools.list_ports
 import threading
 import time
-import re
 
 # ---------- Globals ----------
 ser = None
 running = False
+serial_thread = None
 
 # ---------- Serial Utility Functions ----------
 
@@ -89,7 +89,6 @@ button_row = [
     sg.Button("Start Display", size=(20, 2), key="-START-"),
     sg.Button("End Display", size=(20, 2), key="-END-", visible=False)
 ]
-
 exit_button = sg.Button("Exit", size=(20, 2))
 
 layout = [
@@ -102,9 +101,6 @@ layout = [
 
 window = sg.Window("Teensy Monitor", layout, finalize=True,
                    resizable=False, size=(650, 600))
-
-running = False
-serial_thread = None
 
 # ---------- Main Event Loop ----------
 while True:
@@ -122,21 +118,20 @@ while True:
         success = False
         for port in ports:
             try:
-                print("Trying port:", port)
-                ser = serial.Serial(port, 115200, timeout=1)
+                # Open port with small timeout to avoid blocking
+                ser = serial.Serial(port, 115200, timeout=0.1)
                 running = True
                 serial_thread = threading.Thread(
                     target=read_serial_data, args=(window,), daemon=True)
                 serial_thread.start()
                 success = True
                 break
-            except Exception as e:
-                print("Failed on port", port, e)
+            except (OSError, serial.SerialException) as e:
+                print(f"Skipping port {port}: {e}")
                 continue
         if not success:
-            sg.popup_error("No USB stream found. Returning to main menu.")
-            continue
-        # Don't hide the button until data arrives (handled in -SHOW-)
+            sg.popup_error(
+                "No available serial stream found. Make sure Teensy is connected or Bluetooth is paired.")
 
     elif event == '-SHOW-':
         window['-LIVECOL-'].update(visible=True)
@@ -158,12 +153,10 @@ while True:
 
     elif event == '-DATA-':
         data = values['-DATA-']
-        # Update GPS Fix Status
         if 'sat' in data and data['sat'] != '0' and data['sat'].lower() != 'nan':
             window["-GPSFIX-"].update("Fix Acquired")
         else:
             window["-GPSFIX-"].update("No Fix")
-        # Update all fields
         for key in ['date', 'time', 'lat', 'lon', 'alt', 'sat']:
             if key in data:
                 window_key = "-" + key.upper() + "-" if key != 'sat' else "-SAT-"
@@ -192,7 +185,6 @@ while True:
         window['-LIVECOL-'].update(visible=False)
         window["-END-"].update(visible=False)
         window["-START-"].update(visible=True)
-        # Reset values
         for key in ["-GPSFIX-", "-DATE-", "-TIME-", "-LAT-", "-LON-", "-ALT-", "-SAT-",
                     "-ACCX-", "-ACCY-", "-ACCZ-", "-MAGX-", "-MAGY-", "-MAGZ-",
                     "-GYRX-", "-GYRY-", "-GYRZ-", "-TEMP-"]:
